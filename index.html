@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sitzplan</title>
+<style>
+  :root {
+    --bg: #f4f1ea; --card: #fffdf8; --ink: #2b2622; --muted: #7a6f64; --line: #ddd3c4;
+    --accent: #7b4b2a; --accent-soft: #f3e6d8;
+    --g: #2f9e44; --y: #e8a400; --r: #e03131;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.4 system-ui, "Segoe UI", Roboto, sans-serif; }
+  header {
+    position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center;
+    padding: 10px 20px; background: var(--card); border-bottom: 1px solid var(--line);
+  }
+  h1 { font-size: 20px; margin: 0; letter-spacing: .3px; }
+  .tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+  .tabs button { border-color: transparent; background: transparent; }
+  .tabs button.active { background: var(--accent); color: #fff; }
+  .actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+  button {
+    font: inherit; cursor: pointer; border: 1px solid var(--line); background: #fff; color: var(--ink);
+    border-radius: 8px; padding: 6px 12px;
+  }
+  button:hover { border-color: var(--accent); }
+  input {
+    font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); min-width: 0;
+  }
+  input:focus { outline: 2px solid #d9b48a; border-color: var(--accent); }
+  input[type=number] { width: 80px; }
+  main { padding: 20px; max-width: 1600px; margin: 0 auto; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; margin-bottom: 16px; }
+  .hint { color: var(--muted); font-size: 13px; }
+
+  /* Personen */
+  .people { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(460px, 100%), 1fr)); gap: 6px 24px; }
+  .person-row { display: grid; grid-template-columns: 30px 1fr 1fr 34px; gap: 6px; align-items: center; }
+  .num { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+  .del { padding: 4px; color: var(--muted); }
+  .del:hover { color: var(--r); border-color: var(--r); }
+
+  /* Matrix */
+  .matrix-wrap { overflow: auto; max-height: calc(100vh - 170px); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 0 8px 8px 0; }
+  #matrix { border-collapse: separate; border-spacing: 2px; font-size: 13px; }
+  #matrix th { background: var(--card); font-weight: 500; white-space: nowrap; }
+  #matrix thead th { position: sticky; top: 0; z-index: 2; vertical-align: bottom; padding: 8px 0 4px; }
+  #matrix th.corner { position: sticky; left: 0; z-index: 3; }
+  #matrix .colh span {
+    writing-mode: vertical-rl; transform: rotate(180deg); display: inline-block; max-height: 160px;
+    overflow: hidden; text-overflow: ellipsis; width: 26px; line-height: 26px;
+  }
+  #matrix .rowh { position: sticky; left: 0; z-index: 1; text-align: right; padding: 0 10px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+  #matrix td { width: 26px; height: 26px; min-width: 26px; padding: 0; }
+  #matrix td.cell { background: #ece5da; border-radius: 4px; cursor: pointer; }
+  #matrix td.cell.hl { background: #ddd0bd; }
+  #matrix td.cell[data-v=g] { background: var(--g); }
+  #matrix td.cell[data-v=y] { background: var(--y); }
+  #matrix td.cell[data-v=r] { background: var(--r); }
+  #matrix td.cell:hover { outline: 2px solid var(--ink); }
+  #matrix th.hl { color: var(--accent); font-weight: 700; background: var(--accent-soft); border-radius: 4px; }
+  .legend { display: inline-flex; gap: 12px; align-items: center; }
+  .legend i { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin-right: 4px; }
+
+  /* Tisch */
+  .table-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; }
+  @media (max-width: 900px) { .table-layout { grid-template-columns: 1fr; } }
+  .table-area { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 8px; }
+  #tableSvg { display: block; width: 100%; height: auto; max-height: calc(100vh - 130px); user-select: none; -webkit-user-select: none; }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+  .panel h3 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  .filter { display: flex; align-items: center; gap: 8px; margin: 5px 0; cursor: pointer; }
+  .swatch { width: 24px; height: 5px; border-radius: 3px; }
+  .btn-col { display: flex; flex-direction: column; gap: 6px; }
+  #pool { min-height: 70px; display: flex; flex-direction: column; gap: 6px; border: 2px dashed transparent; border-radius: 8px; padding: 4px; max-height: 55vh; overflow: auto; }
+  #pool.drop { border-color: var(--accent); background: var(--accent-soft); }
+  #pool .empty { color: var(--muted); font-size: 13px; padding: 6px; }
+  .chip { touch-action: none; cursor: grab; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+  .chip:hover { border-color: var(--accent); }
+  .chip small { display: block; color: var(--muted); }
+  .ghost {
+    position: fixed; left: 0; top: 0; pointer-events: none; z-index: 100; background: var(--accent); color: #fff;
+    padding: 6px 12px; border-radius: 999px; box-shadow: 0 4px 14px rgba(0,0,0,.25); white-space: nowrap; margin: -18px 0 0 14px;
+  }
+  body.dragging, body.dragging * { cursor: grabbing !important; }
+  .note { color: var(--muted); padding: 30px; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sitzplan</h1>
+  <nav class="tabs">
+    <button data-tab="people">1 · Personen</button>
+    <button data-tab="matrix">2 · Beziehungen</button>
+    <button data-tab="table">3 · Tisch</button>
+  </nav>
+  <div class="actions">
+    <button id="btnExport" title="Alles als JSON-Datei speichern">Speichern (JSON)</button>
+    <button id="btnImport" title="JSON-Datei laden">Laden (JSON)</button>
+    <input type="file" id="fileImport" accept=".json,application/json" hidden>
+  </div>
+</header>
+
+<main>
+  <section id="tab-people" class="tab" hidden>
+    <div class="toolbar">
+      <label>Anzahl Stühle / Personen: <input type="number" id="chairCount" min="0" max="50"></label>
+      <span class="hint">Änderungen werden automatisch im Browser gespeichert. Zum Teilen „Speichern (JSON)“ verwenden.</span>
+    </div>
+    <div id="peopleList" class="people"></div>
+  </section>
+
+  <section id="tab-matrix" class="tab" hidden>
+    <div class="toolbar">
+      <span class="hint">Klick: leer → grün → gelb → rot → leer. Rechtsklick: zurücksetzen.</span>
+      <span class="legend hint"><span><i style="background:var(--g)"></i>Sympathie</span><span><i style="background:var(--y)"></i>Spannung</span><span><i style="background:var(--r)"></i>Feindschaft</span></span>
+    </div>
+    <div class="matrix-wrap"><table id="matrix"></table></div>
+  </section>
+
+  <section id="tab-table" class="tab" hidden>
+    <div class="table-layout">
+      <div class="table-area"><svg id="tableSvg" xmlns="http://www.w3.org/2000/svg" viewBox="-760 -490 1520 980"></svg></div>
+      <aside>
+        <div class="panel">
+          <h3>Linien anzeigen</h3>
+          <label class="filter"><input type="checkbox" data-filter="g"><span class="swatch" style="background:var(--g)"></span>Grün</label>
+          <label class="filter"><input type="checkbox" data-filter="y"><span class="swatch" style="background:var(--y)"></span>Gelb</label>
+          <label class="filter"><input type="checkbox" data-filter="r"><span class="swatch" style="background:var(--r)"></span>Rot</label>
+          <label class="filter" style="margin-top:10px"><input type="checkbox" data-filter="neighbors">Nur Tischnachbarn</label>
+        </div>
+        <div class="panel">
+          <h3>Aktionen</h3>
+          <div class="btn-col">
+            <button id="btnShuffle">Zufällig verteilen</button>
+            <button id="btnClear">Tisch leeren</button>
+            <button id="btnPng">Als Bild speichern (PNG)</button>
+          </div>
+        </div>
+        <div class="panel">
+          <h3>Nicht platziert</h3>
+          <div id="pool"></div>
+        </div>
+      </aside>
+    </div>
+  </section>
+</main>
+
+<div id="ghost" class="ghost" hidden></div>
+
+<script>
+(() => {
+  'use strict';
+  const STORE = 'sitzplan-v1';
+  const NS = 'http://www.w3.org/2000/svg';
+  const COLORS = { g: '#2f9e44', y: '#e8a400', r: '#e03131' };
+  const CYCLE = ['', 'g', 'y', 'r'];
+  const $ = s => document.querySelector(s);
+
+  const SVG_CSS = `
+    .tbl { fill: #d9b48a; stroke: #8a5a35; stroke-width: 5; }
+    .rel { stroke-width: 4; stroke-linecap: round; fill: none; }
+    .hovering .rel { opacity: .07; }
+    .hovering .rel.hl { opacity: 1; stroke-width: 7; }
+    .seat .chair { fill: #fff; stroke: #a88e75; stroke-width: 2; stroke-dasharray: 5 4; }
+    .seat.occ { cursor: grab; touch-action: none; }
+    .seat.occ .chair { fill: #6b3f22; stroke: #3e2412; stroke-width: 3; stroke-dasharray: none; }
+    .seat .ini { fill: #fff; font-weight: 700; text-anchor: middle; dominant-baseline: central; }
+    .seat .no { fill: #a88e75; text-anchor: middle; dominant-baseline: central; }
+    .seat .nm { fill: #2b2622; font-weight: 600; }
+    .seat .ds { fill: #7a6f64; }
+    .seat.drop .chair { stroke: #e8a400; stroke-width: 7; stroke-dasharray: none; }
+    .hovering .seat.occ:not(.hot):not(.partner) { opacity: .4; }
+    .seat.hot .chair { stroke: #e8a400; stroke-width: 6; }
+    text { font-family: system-ui, "Segoe UI", Roboto, sans-serif; }
+  `;
+
+  // ---------- State ----------
+  const uid = () => 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  const relKey = (a, b) => a < b ? a + '|' + b : b + '|' + a;
+
+  function normalize(o) {
+    const s = { people: [], seats: [], rel: {}, filters: { g: true, y: true, r: true, neighbors: false }, tab: 'people' };
+    if (!o || typeof o !== 'object') return s;
+    const seen = new Set();
+    (Array.isArray(o.people) ? o.people : []).slice(0, 50).forEach(p => {
+      if (!p || typeof p !== 'object') return;
+      let id = typeof p.id === 'string' && p.id ? p.id : uid();
+      if (seen.has(id)) id = uid();
+      seen.add(id);
+      s.people.push({ id, name: String(p.name ?? ''), desc: String(p.desc ?? '') });
+    });
+    const n = s.people.length, used = new Set();
+    for (let i = 0; i < n; i++) {
+      const v = Array.isArray(o.seats) ? o.seats[i] : null;
+      if (typeof v === 'string' && seen.has(v) && !used.has(v)) { s.seats.push(v); used.add(v); }
+      else s.seats.push(null);
+    }
+    if (o.rel && typeof o.rel === 'object') {
+      for (const [k, v] of Object.entries(o.rel)) {
+        const [a, b] = k.split('|');
+        if (seen.has(a) && seen.has(b) && a !== b && ['g', 'y', 'r'].includes(v)) s.rel[relKey(a, b)] = v;
+      }
+    }
+    if (o.filters && typeof o.filters === 'object') for (const f of Object.keys(s.filters)) if (typeof o.filters[f] === 'boolean') s.filters[f] = o.filters[f];
+    if (['people', 'matrix', 'table'].includes(o.tab)) s.tab = o.tab;
+    return s;
+  }
+
+  function load() {
+    try { const raw = localStorage.getItem(STORE); if (raw) return normalize(JSON.parse(raw)); } catch (e) {}
+    return null;
+  }
+  function save() { try { localStorage.setItem(STORE, JSON.stringify(state)); } catch (e) {} }
+
+  let state = load();
+  if (!state) { state = normalize(null); setCount(25, true); }
+
+  const displayName = i => (state.people[i].name.trim() || 'Person ' + (i + 1));
+  const hasRel = id => Object.keys(state.rel).some(k => k.split('|').includes(id));
+  const hasData = p => p.name.trim() || p.desc.trim() || hasRel(p.id);
+  const trunc = (s, m) => s.length > m ? s.slice(0, m - 1) + '…' : s;
+
+  function removePerson(id) {
+    state.people = state.people.filter(p => p.id !== id);
+    for (const k of Object.keys(state.rel)) if (k.split('|').includes(id)) delete state.rel[k];
+    let idx = state.seats.indexOf(id);
+    if (idx < 0) idx = state.seats.lastIndexOf(null); // unplatziert => es gibt einen leeren Stuhl
+    state.seats.splice(idx, 1);
+  }
+
+  function setCount(n, silent) {
+    n = Math.max(0, Math.min(50, Math.floor(Number(n) || 0)));
+    const cur = state.people.length;
+    if (n > cur) {
+      for (let i = cur; i < n; i++) { state.people.push({ id: uid(), name: '', desc: '' }); state.seats.push(null); }
+    } else if (n < cur) {
+      const removed = state.people.slice(n);
+      const filled = removed.filter(hasData).length;
+      if (!silent && filled && !confirm(`Dadurch werden die letzten ${removed.length} Personen entfernt (${filled} davon mit Namen, Beschreibung oder Beziehungen). Fortfahren?`)) return false;
+      removed.forEach(p => removePerson(p.id));
+    }
+    save();
+    return true;
+  }
+
+  // ---------- Tabs ----------
+  function showTab(t) {
+    state.tab = t; save();
+    document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
+    document.querySelectorAll('.tab').forEach(s => s.hidden = s.id !== 'tab-' + t);
+    ({ people: renderPeople, matrix: renderMatrix, table: renderTable })[t]();
+  }
+  document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
+
+  // ---------- Personen ----------
+  const countInput = $('#chairCount');
+  countInput.addEventListener('change', () => {
+    setCount(countInput.value);
+    renderPeople();
+  });
+
+  function renderPeople() {
+    countInput.value = state.people.length;
+    const list = $('#peopleList');
+    list.innerHTML = '';
+    if (!state.people.length) { list.innerHTML = '<div class="note">Noch keine Personen. Oben die Anzahl der Stühle einstellen.</div>'; return; }
+    state.people.forEach((p, i) => {
+      const row = document.createElement('div');
+      row.className = 'person-row';
+      row.innerHTML = `<span class="num">${i + 1}</span><input class="name" placeholder="Name (Person ${i + 1})"><input class="desc" placeholder="Titel / Fraktion"><button class="del" title="Person (und einen Stuhl) entfernen">✕</button>`;
+      const [nm, ds] = row.querySelectorAll('input');
+      nm.value = p.name; ds.value = p.desc;
+      nm.addEventListener('input', () => { p.name = nm.value; save(); });
+      ds.addEventListener('input', () => { p.desc = ds.value; save(); });
+      row.querySelector('.del').addEventListener('click', () => {
+        if (hasData(p) && !confirm(`„${displayName(i)}“ wirklich entfernen? Ein Stuhl wird ebenfalls entfernt.`)) return;
+        removePerson(p.id); save(); renderPeople();
+      });
+      list.append(row);
+    });
+  }
+
+  // ---------- Matrix ----------
+  const matrix = $('#matrix');
+
+  function renderMatrix() {
+    matrix.innerHTML = '';
+    const P = state.people, n = P.length;
+    if (n < 2) { matrix.innerHTML = '<tr><td class="note" style="width:auto">Mindestens zwei Personen nötig.</td></tr>'; return; }
+    const hr = matrix.createTHead().insertRow();
+    const corner = document.createElement('th'); corner.className = 'corner'; hr.append(corner);
+    for (let j = 1; j < n; j++) {
+      const th = document.createElement('th');
+      th.className = 'colh'; th.dataset.c = j; th.title = displayName(j);
+      const sp = document.createElement('span'); sp.textContent = `${j + 1}. ${displayName(j)}`;
+      th.append(sp); hr.append(th);
+    }
+    const tb = matrix.createTBody();
+    for (let i = 0; i < n - 1; i++) {
+      const tr = tb.insertRow();
+      const th = document.createElement('th');
+      th.className = 'rowh'; th.dataset.r = i; th.textContent = `${i + 1}. ${displayName(i)}`; th.title = displayName(i);
+      tr.append(th);
+      for (let j = 1; j < n; j++) {
+        const td = tr.insertCell();
+        if (j > i) {
+          td.className = 'cell'; td.dataset.r = i; td.dataset.c = j;
+          const v = state.rel[relKey(P[i].id, P[j].id)];
+          if (v) td.dataset.v = v;
+          td.title = `${displayName(i)} ↔ ${displayName(j)}`;
+        }
+      }
+    }
+  }
+
+  function setCell(td, v) {
+    const P = state.people, k = relKey(P[+td.dataset.r].id, P[+td.dataset.c].id);
+    if (v) { state.rel[k] = v; td.dataset.v = v; } else { delete state.rel[k]; delete td.dataset.v; }
+    save();
+  }
+  matrix.addEventListener('click', e => {
+    const td = e.target.closest('td.cell'); if (!td) return;
+    setCell(td, CYCLE[(CYCLE.indexOf(td.dataset.v || '') + 1) % CYCLE.length]);
+  });
+  matrix.addEventListener('contextmenu', e => {
+    const td = e.target.closest('td.cell'); if (!td) return;
+    e.preventDefault(); setCell(td, '');
+  });
+  let hlKey = null;
+  function clearHl() { matrix.querySelectorAll('.hl').forEach(x => x.classList.remove('hl')); hlKey = null; }
+  matrix.addEventListener('mouseover', e => {
+    const td = e.target.closest('td.cell');
+    if (!td) { if (hlKey) clearHl(); return; }
+    const r = td.dataset.r, c = td.dataset.c;
+    if (hlKey === r + ',' + c) return;
+    clearHl(); hlKey = r + ',' + c;
+    matrix.querySelectorAll(`[data-r="${r}"], [data-c="${c}"]`).forEach(x => x.classList.add('hl'));
+  });
+  matrix.addEventListener('mouseleave', clearHl);
+
+  // ---------- Tisch ----------
+  const svg = $('#tableSvg');
+  const pool = $('#pool');
+  let hoverId = null;
+
+  function svgEl(tag, attrs, parent) {
+    const e = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
+    if (parent) parent.append(e);
+    return e;
+  }
+  const pos = (i, n, r) => { const a = -Math.PI / 2 + i * 2 * Math.PI / n; return [Math.cos(a) * r, Math.sin(a) * r]; };
+  function initials(name, i) {
+    const w = name.trim().split(/\s+/).filter(Boolean);
+    if (!w.length) return String(i + 1);
+    return (w[0][0] + (w.length > 1 ? w[w.length - 1][0] : '')).toUpperCase();
+  }
+
+  document.querySelectorAll('[data-filter]').forEach(cb => {
+    cb.addEventListener('change', () => { state.filters[cb.dataset.filter] = cb.checked; save(); renderTable(); });
+  });
+
+  function renderTable() {
+    document.querySelectorAll('[data-filter]').forEach(cb => cb.checked = state.filters[cb.dataset.filter]);
+    const n = state.seats.length, P = state.people;
+    const idx = new Map(P.map((p, i) => [p.id, i]));
+    svg.innerHTML = '';
+    svgEl('style', {}, svg).textContent = SVG_CSS;
+    svg.classList.remove('hovering');
+    hoverId = null;
+
+    if (!n) {
+      const t = svgEl('text', { x: 0, y: 0, 'text-anchor': 'middle', fill: '#7a6f64', 'font-size': 28 }, svg);
+      t.textContent = 'Keine Stühle – zuerst unter „Personen“ die Anzahl festlegen.';
+      renderPool(); return;
+    }
+
+    const ringR = 380;
+    const seatR = Math.max(12, Math.min(34, ringR * (2 * Math.PI / n) * 0.42));
+    const tableR = ringR - seatR - 16;
+    svgEl('circle', { class: 'tbl', cx: 0, cy: 0, r: tableR }, svg);
+
+    // Linien
+    const gLines = svgEl('g', { class: 'lines' }, svg);
+    const seated = [];
+    state.seats.forEach((id, i) => { if (id) seated.push([id, i]); });
+    const lines = [];
+    for (let a = 0; a < seated.length; a++) for (let b = a + 1; b < seated.length; b++) {
+      const [ida, ia] = seated[a], [idb, ib] = seated[b];
+      const v = state.rel[relKey(ida, idb)];
+      if (!v || !state.filters[v]) continue;
+      if (state.filters.neighbors) { const d = Math.abs(ia - ib); if (d !== 1 && d !== n - 1) continue; }
+      lines.push({ ida, idb, ia, ib, v });
+    }
+    const order = { g: 0, y: 1, r: 2 };
+    lines.sort((x, y) => order[x.v] - order[y.v]);
+    const lr = ringR - seatR - 2;
+    for (const L of lines) {
+      const [x1, y1] = pos(L.ia, n, lr), [x2, y2] = pos(L.ib, n, lr);
+      const ln = svgEl('line', { class: 'rel', x1, y1, x2, y2, stroke: COLORS[L.v], 'data-a': L.ida, 'data-b': L.idb }, gLines);
+      svgEl('title', {}, ln).textContent = `${displayName(idx.get(L.ida))} ↔ ${displayName(idx.get(L.idb))}`;
+    }
+
+    // Stühle
+    const nameSize = n > 36 ? 17 : 21, descSize = Math.round(nameSize * 0.75);
+    state.seats.forEach((id, i) => {
+      const [cx, cy] = pos(i, n, ringR);
+      const g = svgEl('g', { class: 'seat' + (id ? ' occ' : ''), 'data-seat': i }, svg);
+      svgEl('circle', { class: 'chair', cx, cy, r: seatR }, g);
+      if (!id) {
+        svgEl('text', { class: 'no', x: cx, y: cy, 'font-size': Math.round(seatR * 0.7) }, g).textContent = i + 1;
+        return;
+      }
+      const pi = idx.get(id), p = P[pi];
+      g.dataset.pid = id;
+      svgEl('text', { class: 'ini', x: cx, y: cy, 'font-size': Math.round(seatR * 0.75) }, g).textContent = initials(p.name, pi);
+      svgEl('title', {}, g).textContent = displayName(pi) + (p.desc.trim() ? ' – ' + p.desc.trim() : '');
+
+      // Beschriftung außen
+      const c = cx / ringR, s = cy / ringR;
+      const [lx, ly] = pos(i, n, ringR + seatR + 10);
+      const anchor = c > 0.25 ? 'start' : c < -0.25 ? 'end' : 'middle';
+      const desc = p.desc.trim();
+      const h = nameSize + (desc ? descSize + 3 : 0);
+      let top = ly - h / 2;
+      if (anchor === 'middle') top = s < 0 ? ly - h : ly;
+      const t = svgEl('text', { 'text-anchor': anchor }, g);
+      const t1 = svgEl('tspan', { class: 'nm', x: lx, y: top + nameSize * 0.8, 'font-size': nameSize }, t);
+      t1.textContent = trunc(displayName(pi), 24);
+      if (desc) {
+        const t2 = svgEl('tspan', { class: 'ds', x: lx, y: top + nameSize + 3 + descSize * 0.8, 'font-size': descSize }, t);
+        t2.textContent = trunc(desc, 30);
+      }
+
+      g.addEventListener('pointerdown', e => startDrag(e, id, i));
+      g.addEventListener('pointerenter', () => { if (!drag) setHover(id); });
+      g.addEventListener('pointerleave', () => { if (!drag) setHover(null); });
+    });
+    renderPool();
+  }
+
+  function setHover(id) {
+    hoverId = id;
+    svg.classList.toggle('hovering', !!id);
+    const partners = new Set();
+    const gLines = svg.querySelector('.lines');
+    svg.querySelectorAll('.rel').forEach(l => {
+      const on = !!id && (l.dataset.a === id || l.dataset.b === id);
+      l.classList.toggle('hl', on);
+      if (on) { partners.add(l.dataset.a === id ? l.dataset.b : l.dataset.a); gLines.append(l); }
+    });
+    svg.querySelectorAll('.seat').forEach(s => {
+      const pid = s.dataset.pid;
+      s.classList.toggle('hot', !!id && pid === id);
+      s.classList.toggle('partner', !!pid && partners.has(pid));
+    });
+  }
+
+  function renderPool() {
+    pool.innerHTML = '';
+    const seatedSet = new Set(state.seats.filter(Boolean));
+    const free = state.people.map((p, i) => [p, i]).filter(([p]) => !seatedSet.has(p.id));
+    if (!free.length) { pool.innerHTML = '<div class="empty">Alle Personen sitzen. Personen hierher ziehen, um sie vom Tisch zu nehmen.</div>'; return; }
+    for (const [p, i] of free) {
+      const chip = document.createElement('div');
+      chip.className = 'chip';
+      chip.textContent = `${i + 1}. ${displayName(i)}`;
+      if (p.desc.trim()) { const sm = document.createElement('small'); sm.textContent = p.desc.trim(); chip.append(sm); }
+      chip.addEventListener('pointerdown', e => startDrag(e, p.id, -1));
+      pool.append(chip);
+    }
+  }
+
+  // ---------- Drag & Drop ----------
+  const ghost = $('#ghost');
+  let drag = null;
+
+  function startDrag(e, id, from) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    drag = { id, from, x0: e.clientX, y0: e.clientY, active: false, target: null };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', endDrag);
+  }
+  function dropTarget(x, y) {
+    const el = document.elementFromPoint(x, y);
+    return el ? el.closest('#tableSvg [data-seat], #pool') : null;
+  }
+  function onMove(e) {
+    if (!drag.active) {
+      if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 5) return;
+      drag.active = true;
+      ghost.textContent = displayName(state.people.findIndex(p => p.id === drag.id));
+      ghost.hidden = false;
+      document.body.classList.add('dragging');
+      setHover(null);
+    }
+    ghost.style.transform = `translate(${e.clientX}px, ${e.clientY}px)`;
+    const t = dropTarget(e.clientX, e.clientY);
+    if (t !== drag.target) {
+      if (drag.target) drag.target.classList.remove('drop');
+      if (t) t.classList.add('drop');
+      drag.target = t;
+    }
+  }
+  function onUp() {
+    const d = drag;
+    endDrag();
+    if (!d || !d.active || !d.target) return;
+    const seats = state.seats;
+    if (d.target.id === 'pool') {
+      if (d.from >= 0) seats[d.from] = null;
+    } else {
+      const to = +d.target.dataset.seat;
+      if (to === d.from) return;
+      const occupant = seats[to];
+      if (d.from >= 0) seats[d.from] = occupant; // tauschen (oder leeren)
+      seats[to] = d.id;                           // aus Pool: bisheriger Besitzer geht in den Pool
+    }
+    save(); renderTable();
+  }
+  function endDrag() {
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', endDrag);
+    if (drag && drag.target) drag.target.classList.remove('drop');
+    drag = null;
+    ghost.hidden = true;
+    document.body.classList.remove('dragging');
+  }
+
+  // ---------- Aktionen ----------
+  $('#btnShuffle').addEventListener('click', () => {
+    if (state.seats.some(Boolean) && !confirm('Aktuelle Sitzordnung durch eine zufällige ersetzen?')) return;
+    const ids = state.people.map(p => p.id);
+    for (let i = ids.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [ids[i], ids[j]] = [ids[j], ids[i]]; }
+    state.seats = ids; save(); renderTable();
+  });
+  $('#btnClear').addEventListener('click', () => {
+    if (state.seats.some(Boolean) && !confirm('Alle Personen vom Tisch nehmen?')) return;
+    state.seats = state.seats.map(() => null); save(); renderTable();
+  });
+
+  function download(blob, name) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.append(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+  const today = () => new Date().toISOString().slice(0, 10);
+
+  $('#btnPng').addEventListener('click', () => {
+    const clone = svg.cloneNode(true);
+    clone.classList.remove('hovering');
+    clone.querySelectorAll('.hl, .hot, .partner, .drop').forEach(x => x.classList.remove('hl', 'hot', 'partner', 'drop'));
+    const vb = svg.viewBox.baseVal, W = 2400, H = Math.round(W * vb.height / vb.width);
+    clone.setAttribute('width', W); clone.setAttribute('height', H);
+    const bg = document.createElementNS(NS, 'rect');
+    bg.setAttribute('x', vb.x); bg.setAttribute('y', vb.y); bg.setAttribute('width', vb.width); bg.setAttribute('height', vb.height); bg.setAttribute('fill', '#fffdf8');
+    clone.insertBefore(bg, clone.querySelector('style').nextSibling);
+    const data = new XMLSerializer().serializeToString(clone);
+    const img = new Image();
+    img.onload = () => {
+      const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+      cv.getContext('2d').drawImage(img, 0, 0, W, H);
+      cv.toBlob(b => b ? download(b, `sitzplan-${today()}.png`) : alert('Bild konnte nicht erzeugt werden.'), 'image/png');
+    };
+    img.onerror = () => alert('Bild konnte nicht erzeugt werden – bitte einen Screenshot machen.');
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(data);
+  });
+
+  $('#btnExport').addEventListener('click', () => {
+    const out = { app: 'sitzplan', version: 1, people: state.people, seats: state.seats, rel: state.rel, filters: state.filters };
+    download(new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' }), `sitzplan-${today()}.json`);
+  });
+  const fileInput = $('#fileImport');
+  $('#btnImport').addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async () => {
+    const f = fileInput.files[0]; fileInput.value = '';
+    if (!f) return;
+    try {
+      const o = JSON.parse(await f.text());
+      if (!o || !Array.isArray(o.people)) throw new Error('kein Sitzplan');
+      if (!confirm(`„${f.name}“ laden? Der aktuelle Stand wird ersetzt.`)) return;
+      const tab = state.tab;
+      state = normalize(o); state.tab = tab; save(); showTab(tab);
+    } catch (e) {
+      alert('Die Datei konnte nicht gelesen werden: ' + e.message);
+    }
+  });
+
+  showTab(state.tab);
+})();
+</script>
+</body>
+</html>
