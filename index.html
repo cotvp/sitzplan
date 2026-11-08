@@ -138,6 +138,7 @@
             <button id="btnClear">Tisch leeren</button>
             <button id="btnPng">Als Bild speichern (PNG)</button>
           </div>
+          <p class="hint" style="margin:10px 0 0">Tipp: Beim Ziehen erscheinen gelbe Zwischenplätze. Dort ablegen, um jemanden dazwischenzusetzen – die nötigen Nachbarn rücken einen Platz weiter.</p>
         </div>
         <div class="panel">
           <h3>Nicht platziert</h3>
@@ -174,6 +175,13 @@
     .seat.drop .chair { stroke: #e8a400; stroke-width: 7; stroke-dasharray: none; }
     .hovering .seat.occ:not(.hot):not(.partner) { opacity: .4; }
     .seat.hot .chair { stroke: #e8a400; stroke-width: 6; }
+    .seat .swap { display: none; fill: none; stroke: #fff; stroke-linecap: round; stroke-linejoin: round; }
+    .seat.swapping .swap { display: inline; }
+    .seat.swapping .ini { display: none; }
+    .gaps { display: none; }
+    .dragging .gaps { display: inline; }
+    .gapslot { fill: #fff; stroke: #e8a400; stroke-width: 3; transform-box: fill-box; transform-origin: center; }
+    .gapslot.drop { fill: #e8a400; stroke: #8a5a35; transform: scale(1.5); }
     text { font-family: system-ui, "Segoe UI", Roboto, sans-serif; }
   `;
 
@@ -345,6 +353,7 @@
   const svg = $('#tableSvg');
   const pool = $('#pool');
   let hoverId = null;
+  let geom = null; // Geometrie des aktuell gezeichneten Tisches
 
   function svgEl(tag, attrs, parent) {
     const e = document.createElementNS(NS, tag);
@@ -372,6 +381,7 @@
     svg.classList.remove('hovering');
     hoverId = null;
 
+    geom = null;
     if (!n) {
       const t = svgEl('text', { x: 0, y: 0, 'text-anchor': 'middle', fill: '#7a6f64', 'font-size': 28 }, svg);
       t.textContent = 'Keine Stühle – zuerst unter „Personen“ die Anzahl festlegen.';
@@ -381,6 +391,7 @@
     const ringR = 380;
     const seatR = Math.max(12, Math.min(34, ringR * (2 * Math.PI / n) * 0.42));
     const tableR = ringR - seatR - 16;
+    geom = { n, ringR, seatR, tableR };
     svgEl('circle', { class: 'tbl', cx: 0, cy: 0, r: tableR }, svg);
 
     // Linien
@@ -417,6 +428,13 @@
       const pi = idx.get(id), p = P[pi];
       g.dataset.pid = id;
       svgEl('text', { class: 'ini', x: cx, y: cy, 'font-size': Math.round(seatR * 0.75) }, g).textContent = initials(p.name, pi);
+      // Tausch-Symbol (⇄), nur sichtbar wenn beim Ziehen über diesem Platz
+      const u = seatR * 0.5;
+      svgEl('path', {
+        class: 'swap', transform: `translate(${cx} ${cy})`, 'stroke-width': Math.max(2, seatR * 0.12),
+        d: `M${-u} ${-0.4 * u}H${u}M${0.6 * u} ${-0.75 * u}L${u} ${-0.4 * u}L${0.6 * u} ${-0.05 * u}` +
+           `M${u} ${0.4 * u}H${-u}M${-0.6 * u} ${0.05 * u}L${-u} ${0.4 * u}L${-0.6 * u} ${0.75 * u}`
+      }, g);
       svgEl('title', {}, g).textContent = displayName(pi) + (p.desc.trim() ? ' – ' + p.desc.trim() : '');
 
       // Beschriftung außen
@@ -439,6 +457,16 @@
       g.addEventListener('pointerenter', () => { if (!drag) setHover(id); });
       g.addEventListener('pointerleave', () => { if (!drag) setHover(null); });
     });
+
+    // Zwischenplätze (nur beim Ziehen sichtbar)
+    if (n >= 2) {
+      const gr = Math.max(7, Math.min(13, ringR * (2 * Math.PI / n) * 0.16));
+      const gGaps = svgEl('g', { class: 'gaps' }, svg);
+      for (let i = 0; i < n; i++) {
+        const [x, y] = pos(i + 0.5, n, ringR);
+        svgEl('circle', { class: 'gapslot', 'data-gap': i, cx: x, cy: y, r: gr }, gGaps);
+      }
+    }
     renderPool();
   }
 
@@ -486,9 +514,65 @@
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', endDrag);
   }
+  // Ziel über Winkel bestimmen: Mitte zwischen zwei Stühlen = Zwischenplatz, sonst nächster Stuhl.
   function dropTarget(x, y) {
     const el = document.elementFromPoint(x, y);
-    return el ? el.closest('#tableSvg [data-seat], #pool') : null;
+    if (!el) return null;
+    if (el.closest('#pool')) return { kind: 'pool', el: pool };
+    if (!geom || !el.closest('#tableSvg')) return null;
+    const pt = new DOMPoint(x, y).matrixTransform(svg.getScreenCTM().inverse());
+    if (Math.hypot(pt.x, pt.y) < geom.tableR * 0.55) return null;
+    const n = geom.n;
+    let f = (Math.atan2(pt.y, pt.x) + Math.PI / 2) / (2 * Math.PI / n);
+    f = ((f % n) + n) % n;
+    const base = Math.floor(f), off = f - base;
+    if (n >= 2 && off > 0.3 && off < 0.7) {
+      const i = base % n;
+      return { kind: 'gap', i, el: svg.querySelector(`.gapslot[data-gap="${i}"]`) };
+    }
+    const i = Math.round(f) % n;
+    return { kind: 'seat', i, el: svg.querySelector(`.seat[data-seat="${i}"]`) };
+  }
+
+  // Person in die Lücke zwischen Stuhl g und g+1 setzen; minimale Anzahl Personen rückt weiter.
+  function insertAtGap(id, from, g) {
+    const s = state.seats, n = s.length;
+    const at = k => ((k % n) + n) % n;
+    if (from >= 0) s[from] = null;
+    let cw = -1, ccw = -1;
+    for (let k = 0; k < n; k++) if (!s[at(g + 1 + k)]) { cw = k; break; }
+    for (let m = 0; m < n; m++) if (!s[at(g - m)]) { ccw = m; break; }
+    if (cw < 0) return;
+    if (cw <= ccw) {           // im Uhrzeigersinn (bei Gleichstand bevorzugt)
+      for (let k = cw; k > 0; k--) s[at(g + 1 + k)] = s[at(g + k)];
+      s[at(g + 1)] = id;
+    } else {                   // gegen den Uhrzeigersinn
+      for (let m = ccw; m > 0; m--) s[at(g - m)] = s[at(g - m + 1)];
+      s[at(g)] = id;
+    }
+  }
+
+  // Verschobene Personen von ihrer alten Position zur neuen gleiten lassen.
+  function animateMoves(old) {
+    if (!geom) return;
+    const n = geom.n, moved = [];
+    svg.querySelectorAll('.seat.occ').forEach(g => {
+      const o = old.get(g.dataset.pid), ni = +g.dataset.seat;
+      if (o === undefined || o === ni) return;
+      const [ox, oy] = pos(o, n, geom.ringR), [nx, ny] = pos(ni, n, geom.ringR);
+      g.style.transition = 'none';
+      g.style.transform = `translate(${ox - nx}px, ${oy - ny}px)`;
+      moved.push(g);
+    });
+    if (!moved.length) return;
+    const lines = svg.querySelector('.lines');
+    lines.style.opacity = '0';
+    svg.getBoundingClientRect(); // Reflow erzwingen
+    requestAnimationFrame(() => {
+      moved.forEach(g => { g.style.transition = 'transform .3s ease'; g.style.transform = ''; });
+      lines.style.transition = 'opacity .25s ease .2s';
+      lines.style.opacity = '';
+    });
   }
   function onMove(e) {
     if (!drag.active) {
@@ -498,37 +582,48 @@
       ghost.hidden = false;
       document.body.classList.add('dragging');
       setHover(null);
+      svg.classList.add('dragging');
     }
     ghost.style.transform = `translate(${e.clientX}px, ${e.clientY}px)`;
     const t = dropTarget(e.clientX, e.clientY);
-    if (t !== drag.target) {
-      if (drag.target) drag.target.classList.remove('drop');
-      if (t) t.classList.add('drop');
-      drag.target = t;
+    const oldEl = drag.target && drag.target.el, newEl = t && t.el;
+    if (oldEl !== newEl) {
+      if (oldEl) oldEl.classList.remove('drop', 'swapping');
+      if (newEl) {
+        newEl.classList.add('drop');
+        if (t.kind === 'seat' && t.i !== drag.from && state.seats[t.i]) newEl.classList.add('swapping');
+      }
     }
+    drag.target = t;
   }
   function onUp() {
     const d = drag;
     endDrag();
     if (!d || !d.active || !d.target) return;
     const seats = state.seats;
-    if (d.target.id === 'pool') {
-      if (d.from >= 0) seats[d.from] = null;
+    const old = new Map();
+    seats.forEach((id, i) => { if (id) old.set(id, i); });
+    const t = d.target;
+    if (t.kind === 'pool') {
+      if (d.from < 0) return;
+      seats[d.from] = null;
+    } else if (t.kind === 'gap') {
+      insertAtGap(d.id, d.from, t.i);
     } else {
-      const to = +d.target.dataset.seat;
-      if (to === d.from) return;
-      const occupant = seats[to];
+      if (t.i === d.from) return;
+      const occupant = seats[t.i];
       if (d.from >= 0) seats[d.from] = occupant; // tauschen (oder leeren)
-      seats[to] = d.id;                           // aus Pool: bisheriger Besitzer geht in den Pool
+      seats[t.i] = d.id;                          // aus Pool: bisheriger Besitzer geht in den Pool
     }
-    save(); renderTable();
+    save(); renderTable(); animateMoves(old);
   }
   function endDrag() {
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', onUp);
     window.removeEventListener('pointercancel', endDrag);
-    if (drag && drag.target) drag.target.classList.remove('drop');
+    if (drag && drag.target && drag.target.el) drag.target.el.classList.remove('drop', 'swapping');
     drag = null;
+    svg.classList.remove('dragging');
     ghost.hidden = true;
     document.body.classList.remove('dragging');
   }
